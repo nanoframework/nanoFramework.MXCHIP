@@ -1,0 +1,87 @@
+# Copyright (c) .NET Foundation and Contributors
+# See LICENSE file in the project root for full license information.
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - .github_changelog_generator
+      - .gitignore
+      - CHANGELOG.md
+      - LICENSE.md
+      - README.md
+      - NuGet.Config
+      - assets/*
+      - config/*
+      - .github/*
+      - Tests/*
+
+# PR always trigger build
+pr:
+  autoCancel: true
+
+# add nf-tools repo to resources (for Azure Pipelines templates)
+resources:
+  repositories:
+    - repository: templates
+      type: github
+      name: nanoframework/nf-tools
+      endpoint: nanoframework
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  - group: sign-client-credentials
+  - name: DOTNET_NOLOGO
+    value: true  
+  - name: buildPlatform
+    value: 'Any CPU'  
+  - name: buildConfiguration
+    value: 'Release'
+  - name: solution
+    value: 'nanoFramework.MxChip.sln'
+  - name: nugetPackageName
+    value: 'nanoFramework.MXCHIP_AZ3166'
+
+steps:
+
+# step from template @ nf-tools repo
+# build steps only
+- template: azure-pipelines-templates/class-lib-build.yml@templates  
+  parameters:
+    sonarCloudProject: 'nanoframework_nanoFramework.MXCHIP'
+
+# create GitHub release from main branche
+- task: GithubRelease@1
+  condition: >-
+    and(
+      succeeded(),
+      eq(variables['System.PullRequest.PullRequestId'], ''),
+      startsWith(variables['Build.SourceBranch'], 'refs/heads/main'),
+      not(contains(variables['Build.SourceBranch'], 'preview')),
+      ne(variables['StartReleaseCandidate'], true)
+    )
+  displayName: Create GitHub stable release
+  inputs:
+    action: edit
+    gitHubConnection: 'github.com_nano-$(System.TeamProject)'
+    tagSource: userSpecifiedTag
+    tag: v$(MY_NUGET_VERSION)
+    title: 'M5Stack Board Support Packages v$(MY_NUGET_VERSION)'
+    releaseNotesSource: inline
+    releaseNotesInline: 'Check the [changelog]($(Build.Repository.Uri)/blob/$(Build.SourceBranchName)/CHANGELOG.md).<br><br><h4>Install from NuGet</h4><br>The following NuGet packages are available for download from this release:<br>:package: [MXCHIP_AZ3166](https://www.nuget.org/packages/nanoFramework.MXCHIP_AZ3166/$(MY_NUGET_VERSION)) v$(MY_NUGET_VERSION).'
+    assets: '$(Build.ArtifactStagingDirectory)/$(nugetPackageName).$(MY_NUGET_VERSION).nupkg'
+    isPreRelease: false
+    addChangeLog: false
+
+# step from template @ nf-tools repo
+# report error
+- template: azure-pipelines-templates/discord-webhook-task.yml@templates  
+  parameters:
+    status: 'failure'
+    webhookUrl: '$(DiscordWebhook)'
+    message: ''
